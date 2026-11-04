@@ -1,0 +1,14 @@
+.env
+work/
+work_debug/
+data/
+*.bin
+*.pt
+*.safetensors
+*.model
+*.vocab
+__pycache__/
+.venv/
+venv/
+*.tmp
+*.log

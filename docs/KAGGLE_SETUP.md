@@ -1,0 +1,7 @@
+# Kaggle setup
+
+Use a Kaggle notebook with a single T4 GPU and enable Internet only for the explicitly online data stage. Add `HF_TOKEN` as a Kaggle Secret; never commit it or place it in notebook output. Clone this repository in the notebook and install with `pip install -r requirements.txt`. Authenticate through `huggingface_hub.login(token=...)` using the secret, or rely on the environment variable.
+
+Run tokenizer sampling on Kaggle when a representative sample will not fit locally. Enable the desired source in `configs/sources.json`, then explicitly pass `--online`. For full processing, set bounded `--max_docs`/`--max_minutes` values and rerun the same command in later sessions to resume from `manifest.json`. Stop well before the 12-hour session limit and leave time to flush files. Streaming order can vary; verify source revision/state before relying on a resume.
+
+Inspect `manifest.json`, source counts, train/validation token counts, and run `scripts/validate_bins.py` after processing. Keep within the 20 GB disk budget: remove unneeded downloads and intermediate samples, and avoid duplicate copies of the corpus. Save `train.bin`, `val.bin`, tokenizer model/vocabulary/metadata, and manifest as a private Kaggle dataset or private Hugging Face repository. Train the `small` 42M pilot first with fp16 on T4; `medium` is the later 170M target. Use single-GPU execution, no FlashAttention-2 assumption, and resume from the atomic checkpoint between sessions.

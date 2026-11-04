@@ -1,0 +1,8 @@
+{
+  "online_enabled": false,
+  "sources": [
+    {"name": "local_fixture", "enabled": true, "path": "tests/fixtures/sample_hi.txt", "dataset": null, "config": null, "max_docs": null, "notes": "Tiny offline fixture; safe default."},
+    {"name": "wikipedia_hi", "enabled": false, "dataset": "wikimedia/wikipedia", "config": "20231101.hi", "max_docs": 100000, "notes": "Optional streamed source; use only with explicit --online."},
+    {"name": "culturax_hi", "enabled": false, "dataset": "uonlp/CulturaX", "config": "hi", "max_docs": 100000, "notes": "May require gated access approval and HF_TOKEN."}
+  ]
+}

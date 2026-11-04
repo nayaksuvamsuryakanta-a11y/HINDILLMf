@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label": "Install requirements", "type": "shell", "command": "python -m pip install -r requirements.txt", "problemMatcher": []},
+    {"label": "Check environment", "type": "shell", "command": "python scripts/check_env.py", "problemMatcher": []},
+    {"label": "Make fixture", "type": "shell", "command": "python scripts/make_fixture.py", "problemMatcher": []},
+    {"label": "Offline smoke test", "type": "shell", "command": "python scripts/smoke_test.py --offline", "problemMatcher": []},
+    {"label": "Validate bins", "type": "shell", "command": "python scripts/validate_bins.py --work work_debug", "problemMatcher": []}
+  ]
+}
