@@ -20,4 +20,16 @@ Use Kaggle for full tokenizer samples, multi-session data processing, and pilot 
 
 Processing appends to `train.bin` and `val.bin` and atomically updates `manifest.json`. Re-run the same process command to resume. Change tokenizer only after backing up or removing old bins; a fingerprint mismatch aborts unless `--overwrite` is explicit. Training resumes from `work/ckpt.pt`, written atomically. Avoid retaining source copies and temporary tokenizer samples on the 20 GB Kaggle disk; save only the tokenizer, bins, manifest, and checkpoints you need.
 
-Milestones are in [PLAN_OCT15_OCT31.md](PLAN_OCT15_OCT31.md), and open work is tracked in [BACKLOG.md](BACKLOG.md). Assumptions are recorded in [ASSUMPTIONS.md](ASSUMPTIONS.md).
+Milestones are in [PLAN_EXECUTION.md](PLAN_EXECUTION.md), and open work is tracked in [BACKLOG.md](BACKLOG.md). Assumptions are recorded in [ASSUMPTIONS.md](ASSUMPTIONS.md).
+
+## Phase 2: Kaggle Setup
+
+The repository includes `.gitattributes` with `* text=auto eol=lf`, so Git normalizes text files to LF for Kaggle's Linux environment. Before using remote datasets or pushing checkpoints, configure `HF_TOKEN` and `HF_REPO_ID` in a local `.env` file (never commit it), or configure them as Kaggle Secrets. Verify credentials and repository access with:
+
+```sh
+python scripts/check_remotes.py
+```
+
+To include those checks in the environment report, run `python scripts/check_env.py --online`. These commands contact Hugging Face. The check logs in and reads the configured repository metadata; `repo_info` verifies authenticated repository access but does not independently prove write permission. The optional checkpoint upload will still require a token with write scope.
+
+Follow [docs/KAGGLE_SETUP.md](docs/KAGGLE_SETUP.md) for the Kaggle workflow and [PLAN_EXECUTION.md](PLAN_EXECUTION.md) for the Nov 4 execution schedule.
