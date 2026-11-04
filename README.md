@@ -33,3 +33,5 @@ python scripts/check_remotes.py
 To include those checks in the environment report, run `python scripts/check_env.py --online`. These commands contact Hugging Face. The check logs in and reads the configured repository metadata; `repo_info` verifies authenticated repository access but does not independently prove write permission. The optional checkpoint upload will still require a token with write scope.
 
 Follow [docs/KAGGLE_SETUP.md](docs/KAGGLE_SETUP.md) for the Kaggle workflow and [PLAN_EXECUTION.md](PLAN_EXECUTION.md) for the Nov 4 execution schedule.
+
+The Week 1 Kaggle tokenizer notebook is [kaggle/week1_tokenizer.ipynb](kaggle/week1_tokenizer.ipynb). It keeps Accelerator set to None through data sampling and tokenizer work; reserve the T4 for the later training session.

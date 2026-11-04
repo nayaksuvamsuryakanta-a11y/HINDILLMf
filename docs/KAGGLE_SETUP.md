@@ -1,6 +1,16 @@
 # Kaggle setup
 
-Use a Kaggle notebook with a single T4 GPU and enable Internet only for the explicitly online data stage. Add `HF_TOKEN` as a Kaggle Secret; never commit it or place it in notebook output. Clone this repository in the notebook and install with `pip install -r requirements.txt`. Authenticate through `huggingface_hub.login(token=...)` using the secret, or rely on the environment variable.
+## Week 1 notebook
+
+Use [`kaggle/week1_tokenizer.ipynb`](../kaggle/week1_tokenizer.ipynb) to sample the tokenizer corpus and train the SentencePiece model on Kaggle. Import it either by downloading the `.ipynb` from this repository and using Kaggle's notebook upload/import action, or by choosing the GitHub import option in Kaggle and supplying the public repository URL `https://github.com/nayaksuvamsuryakanta-a11y/HINDILLMf` with notebook path `kaggle/week1_tokenizer.ipynb`.
+
+Before starting, set **Accelerator: None**, **Internet: On**, and add the Kaggle Secret named `HF_TOKEN`. The notebook intentionally uses no GPU during environment setup, remote verification, sampling, SentencePiece training, or fertility comparison. Its optional artifact upload requires a token with write scope for `Nsuvam/hindi-llm-170m-base`.
+
+Run the cells in order: (1) review settings; (2) clone and inspect the repository; (3) check dependencies and install only missing pure-Python support packages; (4) load `HF_TOKEN` from Kaggle Secrets and write the local `.env`; (5) verify Hugging Face access; (6) inspect disk space; (7) review sampling duration and restart behavior; (8) sample CulturaX and train the tokenizer; (9) compare tokens-per-word with TinyLlama; (10) optionally upload tokenizer artifacts; and (11) review the CPU processing and later T4 training steps. The sampling cell enables only the CulturaX source in the cloned config, so accept its dataset access terms before running it.
+
+Tokenizer sampling does not resume from a manifest or cursor. If the session ends while it is sampling, rerunning that cell starts streaming from the beginning. The notebook explains this before the long-running cell and keeps the Accelerator set to None. A three-million-line sample can take several hours; stay within Kaggle's 12-hour session and weekly GPU quota limits.
+
+For Week 1 setup, sampling, tokenizer training, and processing, keep Accelerator set to **None**. Select a single T4 only for the later `train` session. Internet is needed for cloning and the explicitly online sampling step. Add `HF_TOKEN` as a Kaggle Secret; never commit it or display its value. The Week 1 notebook installs only missing pure-Python support helpers and does not install or upgrade torch, transformers, datasets, or numpy. Ensure Kaggle's base environment already provides those pipeline packages. The notebook authenticates using `huggingface_hub.login` through `scripts/check_remotes.py`.
 
 Run tokenizer sampling on Kaggle when a representative sample will not fit locally. Enable the desired source in `configs/sources.json`, then explicitly pass `--online`. For full processing, set bounded `--max_docs`/`--max_minutes` values and rerun the same command in later sessions to resume from `manifest.json`. Stop well before the 12-hour session limit and leave time to flush files. Streaming order can vary; verify source revision/state before relying on a resume.
 
