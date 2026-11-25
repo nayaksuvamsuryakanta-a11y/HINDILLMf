@@ -1,8 +1,8 @@
+# Local environments use the CPU wheel; Kaggle supplies its CUDA build.
 torch
-transformers
-datasets
-sentencepiece
-numpy
-huggingface_hub
-python-dotenv
-tqdm
+transformers>=5.22,<6
+datasets>=5.1,<6
+sentencepiece>=0.2,<0.3
+numpy>=2.0,<3
+huggingface_hub>=2.4,<3
+python-dotenv>=1.2,<2

@@ -134,16 +134,34 @@ def process_cmd(a) -> None:
     if not model_path.exists() or not meta_path.exists(): raise RuntimeError("Tokenizer missing; run tokenizer first.")
     meta = json.loads(meta_path.read_text(encoding="utf-8")); fingerprint = meta["tokenizer_hash"]
     train_path, val_path, manifest_path = work / "train.bin", work / "val.bin", work / "manifest.json"
-    old = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-    if old and old.get("tokenizer_hash") != fingerprint and (train_path.exists() or val_path.exists()) and not a.overwrite:
-        raise RuntimeError("Tokenizer fingerprint changed while bins exist; pass --overwrite to rebuild.")
+    manifest_exists = manifest_path.exists()
+    old = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_exists else {}
+    if manifest_exists and not a.overwrite:
+        required = ("schema_version", "train_tokens", "val_tokens", "tokenizer_hash")
+        if any(k not in old for k in required):
+            raise RuntimeError("Manifest is missing schema_version or token counts; reprocess with --overwrite.")
+        if old["tokenizer_hash"] != fingerprint:
+            raise RuntimeError("Tokenizer fingerprint changed while bins exist; pass --overwrite to rebuild.")
+        for path, count, label in ((train_path, old["train_tokens"], "train"), (val_path, old["val_tokens"], "validation")):
+            expected_bytes = int(count) * 2
+            actual_bytes = path.stat().st_size if path.exists() else 0
+            if actual_bytes < expected_bytes:
+                raise RuntimeError(f"Data loss detected: {label} binary has {actual_bytes} bytes but manifest requires {expected_bytes}; restore it or reprocess with --overwrite.")
+            discarded = (actual_bytes - expected_bytes) // 2
+            with path.open("r+b" if path.exists() else "wb") as handle:
+                handle.truncate(expected_bytes)
+            if discarded:
+                LOG.info("Discarded %d uncommitted %s tokens while reconciling binary with manifest", discarded, label)
     if a.overwrite:
-        for p in (train_path, val_path, manifest_path): p.unlink(missing_ok=True)
+        for p in (train_path, val_path):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"")
+        manifest_path.unlink(missing_ok=True)
         old = {}
     # Keep the expected split files present even when a tiny local run has not
     # reached the first validation document (every 100th kept document).
     train_path.touch(exist_ok=True); val_path.touch(exist_ok=True)
-    manifest = old or {"source_counts": {}, "global_doc_idx": 0, "train_tokens": 0, "val_tokens": 0,
+    manifest = old or {"schema_version": 2, "source_counts": {}, "global_doc_idx": 0, "train_tokens": 0, "val_tokens": 0,
                        "tokenizer_hash": fingerprint, "last_updated": None, "sources": []}
     online = a.online or bool(json.loads((ROOT / "configs" / "sources.json").read_text(encoding="utf-8")).get("online_enabled", False))
     sources = selected_sources(a.source, online)
@@ -151,6 +169,12 @@ def process_cmd(a) -> None:
     # In-memory line dedupe only; it does not persist across restarted sessions.
     seen: set[bytes] = set(); proc = spm.SentencePieceProcessor(model_file=str(model_path))
     started = time.monotonic(); processed = 0
+    handles = {train_path: train_path.open("ab"), val_path: val_path.open("ab")}
+    def flush_and_save() -> None:
+        for handle in handles.values():
+            handle.flush()
+            os.fsync(handle.fileno())
+        save_manifest(manifest_path, manifest)
     try:
         for src in sources:
             name = src["name"]; skip = int(manifest["source_counts"].get(name, 0))
@@ -163,23 +187,29 @@ def process_cmd(a) -> None:
                 manifest["source_counts"][name] += 1
                 processed += 1
                 item = clean(doc, a.min_chars, a.max_chars, a.min_devanagari_ratio, a.max_latin_ratio)
-                if not item: continue
+                if not item:
+                    if processed % 1000 == 0: flush_and_save()
+                    if (a.max_docs and processed >= a.max_docs) or (a.max_minutes and time.monotonic() - started >= a.max_minutes * 60): raise StopIteration
+                    continue
                 key = hashlib.blake2b(item.encode("utf-8"), digest_size=16).digest()
                 if key in seen: continue
                 seen.add(key)
                 ids = proc.encode(item, out_type=int) + [EOS_ID]
                 dest = val_path if (manifest["global_doc_idx"] + 1) % a.val_every == 0 else train_path
-                with dest.open("ab") as f: np.asarray(ids, dtype=np.uint16).tofile(f)
+                np.asarray(ids, dtype=np.uint16).tofile(handles[dest])
                 if dest == val_path: manifest["val_tokens"] += len(ids)
                 else: manifest["train_tokens"] += len(ids)
                 manifest["global_doc_idx"] += 1
-                if processed % 1000 == 0: save_manifest(manifest_path, manifest)
-                if a.max_docs and processed >= a.max_docs: raise StopIteration
-                if a.max_minutes and time.monotonic() - started >= a.max_minutes * 60: raise StopIteration
+                if processed % 1000 == 0: flush_and_save()
+                if (a.max_docs and processed >= a.max_docs) or (a.max_minutes and time.monotonic() - started >= a.max_minutes * 60): raise StopIteration
     except StopIteration:
         LOG.info("Stopping at configured limit; progress saved.")
+    except KeyboardInterrupt:
+        LOG.info("Interrupted; saving processing progress.")
     finally:
-        save_manifest(manifest_path, manifest)
+        flush_and_save()
+        for handle in handles.values():
+            handle.close()
 
 
 def save_manifest(path: Path, data: dict) -> None:
@@ -193,6 +223,7 @@ def model_dims(size: str) -> tuple[int, int, int, int]:
 
 def train_cmd(a) -> None:
     import numpy as np
+    a.save_every = a.save_every or a.eval_every
     try:
         import torch
         from transformers import LlamaConfig, LlamaForCausalLM
@@ -201,6 +232,7 @@ def train_cmd(a) -> None:
     vocab=a.vocab or meta["vocab_size"]; tr=work/"train.bin"; va=work/"val.bin"
     if not tr.exists() or not va.exists(): raise RuntimeError("train.bin/val.bin missing; run process first.")
     train=np.memmap(tr,dtype=np.uint16,mode="r")
+    manifest=json.loads((work/"manifest.json").read_text(encoding="utf-8"))
     val=np.memmap(va,dtype=np.uint16,mode="r") if va.stat().st_size else train
     device = "cuda" if a.device == "auto" and torch.cuda.is_available() else ("cpu" if a.device == "auto" else a.device)
     d_model,layers,heads,hidden=model_dims(a.size)
@@ -209,18 +241,33 @@ def train_cmd(a) -> None:
     decay=[]; no_decay=[]
     for _,p in model.named_parameters(): (decay if p.dim()>=2 else no_decay).append(p)
     opt=torch.optim.AdamW([{"params":decay,"weight_decay":.1},{"params":no_decay,"weight_decay":0.}],lr=a.lr)
-    ckpt=work/"ckpt.pt"; step=0; scaler=None; use_fp16=False
+    ckpt=work/"ckpt.pt"; step=0; last_saved_step=-1; scaler=None; use_fp16=False
+    dimensions={"hidden_size":d_model,"num_hidden_layers":layers,"num_attention_heads":heads,"intermediate_size":hidden}
+    train_tokens=int(manifest["train_tokens"]); val_tokens=int(manifest["val_tokens"])
+    fingerprint=hashlib.blake2b(f"{meta['tokenizer_hash']}:{train_tokens}:{val_tokens}".encode(),digest_size=32).hexdigest()
+    identity={"tokenizer_hash":meta["tokenizer_hash"],"vocab_size":vocab,"train_tokens":train_tokens,"val_tokens":val_tokens,"block":a.block,"size":a.size,"model_dimensions":dimensions,"manifest_schema_version":manifest.get("schema_version"),"data_fingerprint":fingerprint}
     if device == "cuda":
         major=torch.cuda.get_device_capability()[0]; use_fp16=major<8
         if use_fp16: scaler=torch.amp.GradScaler("cuda")
     if ckpt.exists():
-        state=torch.load(ckpt,map_location=device,weights_only=False); model.load_state_dict(state["model"]); opt.load_state_dict(state["optimizer"]); step=state["step"]
+        state=torch.load(ckpt,map_location=device,weights_only=False)
+        mismatches=[f"{key}: expected {identity.get(key)!r}, checkpoint has {state.get(key)!r}" for key in identity if state.get(key)!=identity[key]]
+        if mismatches and not a.ignore_data_mismatch:
+            raise RuntimeError("Checkpoint data/config mismatch; " + "; ".join(mismatches) + ". Pass --ignore_data_mismatch only if you understand the risk.")
+        if mismatches: LOG.warning("Ignoring checkpoint data/config mismatch (dangerous): %s", "; ".join(mismatches))
+        model.load_state_dict(state["model"]); opt.load_state_dict(state["optimizer"]); step=state["step"]
         if scaler and state.get("scaler"): scaler.load_state_dict(state["scaler"])
         torch.set_rng_state(state["cpu_rng"])
+        if state.get("python_rng") is not None: random.setstate(state["python_rng"])
+        if state.get("numpy_rng") is not None: np.random.set_state(state["numpy_rng"])
         if device == "cuda" and state.get("cuda_rng") is not None: torch.cuda.set_rng_state_all(state["cuda_rng"])
+        last_saved_step=step
         LOG.info("Resumed checkpoint at step %d",step)
     eval_data = val if len(val) > a.block + 1 else train
-    if len(val) <= a.block + 1: LOG.warning("Validation split has fewer than block+1 tokens; using train.bin for smoke-test evaluation.")
+    if len(val) <= a.block + 1:
+        if not a.allow_train_eval:
+            raise RuntimeError("Validation split has fewer than block+1 tokens; provide more validation data or pass --allow_train_eval for diagnostic training-data evaluation.")
+        LOG.warning("Validation split is too small; reported validation loss is computed on training data because --allow_train_eval was passed.")
     def batch(data):
         if len(data)<=a.block+1: raise RuntimeError("Binary split too short for selected block size.")
         ix=np.random.randint(0,len(data)-a.block-1,size=a.micro_bs)
@@ -233,6 +280,12 @@ def train_cmd(a) -> None:
                 x,y=batch(eval_data); losses.append(float(model(input_ids=x,labels=y).loss))
         model.train(); return sum(losses)/len(losses)
     start=time.monotonic()
+    def save_checkpoint() -> None:
+        nonlocal last_saved_step
+        state={"model":model.state_dict(),"model_config":cfg.to_dict(),"optimizer":opt.state_dict(),"scaler":scaler.state_dict() if scaler else None,"step":step,"cpu_rng":torch.get_rng_state(),"cuda_rng":torch.cuda.get_rng_state_all() if device=="cuda" else None,"python_rng":random.getstate(),"numpy_rng":np.random.get_state(),**identity}
+        tmp=ckpt.with_suffix(".pt.tmp"); began=time.monotonic(); torch.save(state,tmp); os.replace(tmp,ckpt)
+        last_saved_step=step
+        LOG.info("Checkpoint saved at step %d (%.2f MB, %.2f seconds)",step,ckpt.stat().st_size/(1024*1024),time.monotonic()-began)
     while step<a.max_steps and time.monotonic()-start<a.max_minutes*60:
         opt.zero_grad(set_to_none=True); loss_total=0.
         for _ in range(a.accum):
@@ -254,8 +307,9 @@ def train_cmd(a) -> None:
         else: opt.step()
         step+=1
         if step%a.eval_every==0: LOG.info("step=%d train_loss=%.4f val_loss=%.4f",step,loss_total,evaluate())
-        state={"model":model.state_dict(),"model_config":cfg.to_dict(),"optimizer":opt.state_dict(),"scaler":scaler.state_dict() if scaler else None,"step":step,"cpu_rng":torch.get_rng_state(),"cuda_rng":torch.cuda.get_rng_state_all() if device=="cuda" else None}
-        tmp=ckpt.with_suffix(".pt.tmp"); torch.save(state,tmp); os.replace(tmp,ckpt)
+        if step%a.save_every==0: save_checkpoint()
+    if last_saved_step != step:
+        save_checkpoint()
     LOG.info("Training stopped at step %d; checkpoint %s",step,ckpt)
     if a.hf_repo:
         try:
@@ -277,8 +331,11 @@ def load_for_inference(work: Path, checkpoint: Path | None = None):
 
 def eval_cmd(a) -> None:
     import numpy as np
+    val_path=Path(a.work)/"val.bin"
+    if not val_path.exists() or val_path.stat().st_size//2 < a.block+1:
+        raise RuntimeError(f"Validation split has fewer than block+1 ({a.block+1}) tokens; provide a larger validation split before evaluation.")
     torch,model=load_for_inference(Path(a.work),Path(a.checkpoint) if a.checkpoint else None)
-    data=np.memmap(Path(a.work)/"val.bin",dtype=np.uint16,mode="r"); losses=[]
+    data=np.memmap(val_path,dtype=np.uint16,mode="r"); losses=[]
     with torch.no_grad():
         for _ in range(a.batches):
             i=random.randrange(0,len(data)-a.block-1); x=torch.tensor(data[i:i+a.block].astype("int64")).unsqueeze(0); y=torch.tensor(data[i+1:i+a.block+1].astype("int64")).unsqueeze(0); losses.append(float(model(input_ids=x,labels=y).loss))
@@ -305,7 +362,7 @@ def parser() -> argparse.ArgumentParser:
     f=sub.add_parser("fixture"); f.set_defaults(func=lambda a:make_fixture())
     t=sub.add_parser("tokenizer"); t.add_argument("--source",choices=["local","hf","all"],default="local"); t.add_argument("--work",default="work"); t.add_argument("--vocab",type=int,default=32000); t.add_argument("--max_sample_lines",type=int,default=100000); t.add_argument("--dry_run",action="store_true"); t.add_argument("--online",action="store_true"); t.set_defaults(func=tokenizer_cmd)
     q=sub.add_parser("process"); q.add_argument("--source",choices=["local","hf","all"],default="local"); q.add_argument("--work",default="work"); q.add_argument("--online",action="store_true"); q.add_argument("--max_docs",type=int,default=0); q.add_argument("--max_minutes",type=float,default=0); q.add_argument("--chunk_docs",type=int,default=1000); q.add_argument("--min_chars",type=int,default=20); q.add_argument("--max_chars",type=int,default=5000); q.add_argument("--min_devanagari_ratio",type=float,default=.6); q.add_argument("--max_latin_ratio",type=float,default=.25); q.add_argument("--val_every",type=int,default=100); q.add_argument("--overwrite",action="store_true"); q.set_defaults(func=process_cmd)
-    tr=sub.add_parser("train"); tr.add_argument("--size",choices=["tiny","small","medium"],default="tiny"); tr.add_argument("--device",choices=["auto","cuda","cpu"],default="auto"); tr.add_argument("--work",default="work"); tr.add_argument("--vocab",type=int); tr.add_argument("--max_steps",type=int,default=1000); tr.add_argument("--block",type=int,default=512); tr.add_argument("--micro_bs",type=int,default=2); tr.add_argument("--accum",type=int,default=8); tr.add_argument("--eval_every",type=int,default=100); tr.add_argument("--max_minutes",type=float,default=700); tr.add_argument("--lr",type=float,default=3e-4); tr.add_argument("--warmup_steps",type=int,default=100); tr.add_argument("--hf_repo"); tr.set_defaults(func=train_cmd)
+    tr=sub.add_parser("train"); tr.add_argument("--size",choices=["tiny","small","medium"],default="tiny"); tr.add_argument("--device",choices=["auto","cuda","cpu"],default="auto"); tr.add_argument("--work",default="work"); tr.add_argument("--vocab",type=int); tr.add_argument("--max_steps",type=int,default=1000); tr.add_argument("--block",type=int,default=512); tr.add_argument("--micro_bs",type=int,default=2); tr.add_argument("--accum",type=int,default=8); tr.add_argument("--eval_every",type=int,default=100); tr.add_argument("--save_every",type=int); tr.add_argument("--allow_train_eval",action="store_true"); tr.add_argument("--ignore_data_mismatch",action="store_true"); tr.add_argument("--max_minutes",type=float,default=700); tr.add_argument("--lr",type=float,default=3e-4); tr.add_argument("--warmup_steps",type=int,default=100); tr.add_argument("--hf_repo"); tr.set_defaults(func=train_cmd)
     ev=sub.add_parser("evaluate"); ev.add_argument("--work",default="work"); ev.add_argument("--checkpoint"); ev.add_argument("--block",type=int,default=128); ev.add_argument("--batches",type=int,default=20); ev.set_defaults(func=eval_cmd)
     g=sub.add_parser("generate"); g.add_argument("--work",default="work"); g.add_argument("--prompt",required=True); g.add_argument("--max_new_tokens",type=int,default=80); g.add_argument("--temperature",type=float,default=.8); g.add_argument("--top_p",type=float,default=.9); g.add_argument("--repetition_penalty",type=float,default=1.1); g.set_defaults(func=generate_cmd)
     return p

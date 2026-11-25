@@ -6,7 +6,7 @@ An offline-first foundation for cleaning Hindi text, training a 32k SentencePiec
 
 Install dependencies once in a virtual environment, then run the CPU/offline workflow in [docs/RUNBOOK.md](docs/RUNBOOK.md). `scripts/smoke_test.py --offline` uses only the tiny fixture and `work_debug/`; it does not need a token, internet, or CUDA. Generated bins/checkpoints are ignored by Git. The fixture has noisy and clean examples, and can be regenerated with `python scripts/make_fixture.py`.
 
-`python hindi_llm.py tokenizer --source local --dry_run --work work_debug` builds a small local tokenizer. `process` normalizes NFC, filters and deduplicates documents, appends EOS ID 2, and sends every 100th kept document to validation by default. Tiny runs with fewer than 100 documents can have an empty validation split; the CPU smoke test uses `--val_every 5` to exercise both files. Deduplication uses an in-memory BLAKE2 set and therefore does not persist across restarts. Local resume skips already processed documents as counted in `manifest.json`.
+`python hindi_llm.py tokenizer --source local --dry_run --work work_debug` builds a small local tokenizer. `process` normalizes NFC, filters and deduplicates documents, appends EOS ID 2, and sends every 100th kept document to validation by default. Tiny runs can have an undersized validation split; diagnostic training evaluation then requires `--allow_train_eval`. Processing resumes from a schema-version-2 manifest: extra uncommitted binary tails are truncated, but missing committed bytes abort with a data-loss message. Deduplication uses an in-memory BLAKE2 set and therefore does not persist across restarts.
 
 Commands: `fixture`, `tokenizer`, `process`, `train`, `evaluate`, and `generate`. For usage, run `python hindi_llm.py --help` and the relevant command with `--help`.
 
@@ -18,7 +18,7 @@ Use Kaggle for full tokenizer samples, multi-session data processing, and pilot 
 
 ## Resume and storage
 
-Processing appends to `train.bin` and `val.bin` and atomically updates `manifest.json`. Re-run the same process command to resume. Change tokenizer only after backing up or removing old bins; a fingerprint mismatch aborts unless `--overwrite` is explicit. Training resumes from `work/ckpt.pt`, written atomically. Avoid retaining source copies and temporary tokenizer samples on the 20 GB Kaggle disk; save only the tokenizer, bins, manifest, and checkpoints you need.
+Processing appends to `train.bin` and `val.bin`, fsyncs them before atomically updating `manifest.json`, and reconciles their lengths on resume. Re-run the same process command to resume; use `--overwrite` to rebuild from empty bins. Training checkpoints are written atomically at `--save_every` intervals (default: `--eval_every`) and at the final step. Checkpoints are bound to tokenizer, data counts, and model settings; `--ignore_data_mismatch` bypasses that protection and is dangerous. See [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) for tested dependency versions and Kaggle guidance. Avoid retaining source copies and temporary tokenizer samples on the 20 GB Kaggle disk; save only the tokenizer, bins, manifest, and checkpoints you need.
 
 Milestones are in [PLAN_EXECUTION.md](PLAN_EXECUTION.md), and open work is tracked in [BACKLOG.md](BACKLOG.md). Assumptions are recorded in [ASSUMPTIONS.md](ASSUMPTIONS.md).
 

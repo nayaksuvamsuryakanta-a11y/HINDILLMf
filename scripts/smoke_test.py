@@ -8,7 +8,8 @@ if not (ROOT/"tests/fixtures/sample_hi.txt").exists(): run("scripts/make_fixture
 run("hindi_llm.py","tokenizer","--source","local","--dry_run","--work",work)
 run("hindi_llm.py","process","--source","local","--work",work,"--max_docs","20","--val_every","5","--overwrite")
 run("scripts/validate_bins.py","--work",work)
-run("hindi_llm.py","train","--size","tiny","--device","cpu","--work",work,"--max_steps","2","--block","64","--micro_bs","1","--accum","1","--eval_every","1","--max_minutes","5")
+(work/"ckpt.pt").unlink(missing_ok=True)
+run("hindi_llm.py","train","--size","tiny","--device","cpu","--work",work,"--max_steps","2","--block","64","--micro_bs","1","--accum","1","--eval_every","1","--allow_train_eval","--max_minutes","5")
 if a.cleanup:
     import shutil
     shutil.rmtree(work,ignore_errors=True)

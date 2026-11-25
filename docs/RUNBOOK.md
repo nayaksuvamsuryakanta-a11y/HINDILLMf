@@ -16,6 +16,8 @@ python hindi_llm.py train --size tiny --device cpu --work work_debug --max_steps
 python scripts/smoke_test.py --offline
 ```
 
-The smoke script uses `--val_every 5` internally so the tiny data exercises validation. Keep generated artifacts in `work_debug/`. Use `--cleanup` only when you want the smoke script to remove that directory. Normal processing defaults to reserving each 100th kept document for validation. Re-run the same `process` command to resume; processing state is saved to `manifest.json`. A changed tokenizer cannot reuse existing bins unless `--overwrite` is specified.
+The smoke script uses `--val_every 5` and `--allow_train_eval` so tiny data can exercise training and evaluation paths. Keep generated artifacts in `work_debug/`. Use `--cleanup` only when you want the smoke script to remove that directory. Normal processing defaults to reserving each 100th kept document for validation. Re-run the same `process` command to resume; committed token counts in schema-version-2 `manifest.json` control binary reconciliation. Extra binary tails are truncated, but missing committed bytes abort. Use `--overwrite` to reset both binary files and rebuild. Training checkpoints save every `--save_every` steps (defaulting to `--eval_every`) and at the final step; they validate data and tokenizer identity on resume. `--ignore_data_mismatch` is a dangerous escape hatch.
+
+Run `python scripts/test_resume.py` for offline resume, fingerprint, and evaluation-guard regression checks. It keeps its temporary directory unless `--cleanup` is explicitly supplied. Tested package versions and Kaggle dependency guidance are in [ENVIRONMENT.md](ENVIRONMENT.md).
 
 For streaming, use `python scripts/test_stream.py --online` only after setting up access and accepting any gated dataset terms. It is not part of offline validation.
