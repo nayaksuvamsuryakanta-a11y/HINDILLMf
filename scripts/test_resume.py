@@ -24,6 +24,14 @@ def run(*parts: str, expect_success: bool = True) -> subprocess.CompletedProcess
 
 
 try:
+    production_work = work / "production_work"
+    production_work.mkdir()
+    protected_checkpoint = production_work / "ckpt.pt"
+    protected_checkpoint.write_bytes(b"keep this checkpoint")
+    smoke_guard = run("scripts/smoke_test.py", "--offline", "--work", str(production_work), expect_success=False)
+    assert "must not be pointed at a production work directory" in smoke_guard.stdout + smoke_guard.stderr
+    assert protected_checkpoint.read_bytes() == b"keep this checkpoint", "Smoke-test guard deleted a non-debug checkpoint"
+
     run("hindi_llm.py", "tokenizer", "--source", "local", "--dry_run", "--work", str(work))
     process_args = ("hindi_llm.py", "process", "--source", "local", "--work", str(work), "--max_docs", "100", "--val_every", "2")
     run(*process_args)

@@ -7,3 +7,5 @@
 - The CLI is designed for Python 3.10+; tested package versions are recorded in `docs/ENVIRONMENT.md`. Kaggle's preinstalled CUDA stack should be preserved.
 - Checkpoint identity uses tokenizer hash, manifest token counts/schema, model settings, and block size. `--ignore_data_mismatch` bypasses these checks only as a dangerous explicit recovery option.
 - The Week 1 notebook enables only `culturax_hi` for the requested `--source hf` sampling command. This assumes CulturaX access has been approved for the Kaggle account; its source is disabled in the repository config by default.
+- The smoke-test `--work` path must resolve exactly to this repository's `work_debug` directory; equivalent path spellings are accepted after resolution.
+- The Kaggle environment report records missing package versions and unavailable CUDA status as `not installed`, and writes the same report values to `work/env_report.json`.

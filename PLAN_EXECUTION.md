@@ -1,14 +1,20 @@
-# Execution Phase: November 4–17, 2026
+# Execution Phase: 25 November–8 December 2026
 
-## Week 1 (Nov 4-10): Finalize Tokenizer & Data Processing on Kaggle
+## Milestone A (25–28 November): Kaggle setup and tokenizer
 
-- Verify Kaggle environment, Hugging Face credentials, and target repository access.
-- Finalize tokenizer sampling and vocabulary artifacts on Kaggle.
-- Run bounded data processing sessions, verify manifest counts, and validate binary splits.
-- Save processed artifacts privately for the pilot run.
+- Complete Kaggle phone verification.
+- Confirm notebook cells 1–6 pass.
+- Complete tokenizer sampling and 32k BPE training.
+- Record the tokenizer fertility comparison number.
 
-## Week 2 (Nov 11-17): Launch 42M Pilot Training
+## Milestone B (29 November–4 December): Corpus processing
 
-- Configure the single T4 training run with fp16 where required and a session-safe time limit.
-- Start the 42M pilot, verify validation metrics and atomic checkpoints, and resume across sessions as needed.
-- Record the run configuration, data/tokenizer fingerprints, and initial results.
+- Process the corpus in CPU-only sessions toward the target token count.
+- Validate the manifest and binary files after every session.
+
+## Milestone C (5–8 December): Pilot training
+
+- Train the 42M pilot on a single T4.
+- Review the loss curve and make a go/no-go decision.
+
+**No further pipeline code changes are permitted until Milestone A produces a recorded fertility number.**
